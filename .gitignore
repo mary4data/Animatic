@@ -1,0 +1,20 @@
+# frontend
+frontend/node_modules/
+frontend/.output/
+frontend/.wrangler/
+frontend/dist/
+frontend/.env
+
+# backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/storage/*
+!backend/storage/.gitkeep
+
+# editors / OS
+.DS_Store
+
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.local.json
