@@ -63,9 +63,9 @@ picking fewer than 12 scenes), not a step you may skip calling:
    b. Call generate_storyboard(scene_id, heading, action, style_reference) once, \
       passing the style_reference text from step (a).
    c. Call generate_score(scene_id, heading, action, mood_keywords) once.
-   d. For EACH dialogue line in the scene, call generate_voice_lines(scene_id, \
-      line_id, speaker, line, intent) once.
-   e. Once every dialogue line in the scene has been voiced, call \
+   d. Call generate_voice_lines(scene_id) once -- it voices every dialogue \
+      line in the scene itself, concurrently; you do not pass individual lines.
+   e. Once generate_voice_lines has returned for the scene, call \
       assemble_output(scene_id) exactly once to finalize that scene.
 
 5. After every selected scene has been assembled, respond with a short plain-text \
@@ -97,6 +97,7 @@ def _build_tools(job_id: str, script_text: str) -> list:
 
 async def run_job(job_id: str, script_text: str, filename: str) -> None:
     from google.adk.agents import Agent
+    from google.adk.models.google_llm import Gemini
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types as genai_types
@@ -106,7 +107,22 @@ async def run_job(job_id: str, script_text: str, filename: str) -> None:
     try:
         agent = Agent(
             name="animatic_agent",
-            model=gemini_text_model(),
+            # A bare model-name string leaves ADK's own retry_options unset, which
+            # falls back to google-genai's default of only a couple of quick
+            # retries -- not enough to ride out a real "high demand" 503 spike (see
+            # agent.clients.call_gemini_with_retry, which applies this same wider
+            # backoff to the tool calls; the orchestrator's own turn-deciding calls
+            # need it too since they aren't routed through that wrapper).
+            model=Gemini(
+                model=gemini_text_model(),
+                retry_options=genai_types.HttpRetryOptions(
+                    attempts=4,
+                    initial_delay=5,
+                    max_delay=30,
+                    exp_base=2,
+                    http_status_codes=[429, 500, 502, 503, 504],
+                ),
+            ),
             instruction=INSTRUCTION,
             tools=_build_tools(job_id, script_text),
         )

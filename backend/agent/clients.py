@@ -83,7 +83,7 @@ async def call_gemini_with_retry(fn: Callable[..., Any], *args, **kwargs) -> Any
     delays = (5, 15, 30)
     for attempt, delay in enumerate((*delays, None), start=1):
         try:
-            return fn(*args, **kwargs)
+            return await asyncio.to_thread(fn, *args, **kwargs)
         except errors.ServerError as exc:
             if delay is None:
                 raise

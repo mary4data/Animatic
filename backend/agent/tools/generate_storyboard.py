@@ -23,6 +23,7 @@ event's `detail` and in the returned data, not silently swapped in.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -115,9 +116,9 @@ def make_generate_storyboard_tool(job_id: str):
         notes = [char_scratch[s]["description"] for s in speakers if char_scratch.get(s, {}).get("description")]
         character_suffix = " Character notes: " + "; ".join(notes) if notes else ""
 
-        images: list[dict] = []
         client = get_genai_client()
-        for order, beat in enumerate(beats, start=1):
+
+        async def _generate_one(order: int, beat: dict) -> dict:
             beat_name = beat.get("name", f"Beat {order}")
             beat_description = beat.get("description", action)
             prompt = IMAGE_PROMPT_TEMPLATE.format(
@@ -147,7 +148,6 @@ def make_generate_storyboard_tool(job_id: str):
 
             image_url = save_media(job_id, f"{scene_id}_{order}.{extension}", image_bytes)
             image = {"beat": beat_name, "url": image_url, "order": order, "placeholder": used_placeholder}
-            images.append(image)
 
             await job_store.emit(
                 job_id,
@@ -159,7 +159,15 @@ def make_generate_storyboard_tool(job_id: str):
                     data={"beat": beat_name, "image_url": image_url, "order": order, "total": len(beats), "placeholder": used_placeholder},
                 ),
             )
+            return image
 
+        # Beats are independent (each is its own image call) -- generating
+        # them concurrently instead of one-by-one is what actually cuts this
+        # step's wall-clock time, since it's dominated by image-model latency
+        # rather than local work.
+        images = list(
+            await asyncio.gather(*(_generate_one(order, beat) for order, beat in enumerate(beats, start=1)))
+        )
         scratch["images"] = images
 
         await job_store.emit(

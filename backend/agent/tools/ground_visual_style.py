@@ -10,6 +10,8 @@ text-only grounding panel otherwise (frontend SceneDetail renders both cases).
 
 from __future__ import annotations
 
+import asyncio
+
 from agent.clients import get_parallel_client
 from agent.job_store import job_store
 from agent.schemas import TraceEvent
@@ -35,7 +37,7 @@ def make_ground_visual_style_tool(job_id: str):
             f"{location} scene lighting reference",
         ][:3]
 
-        search = client.search(objective=objective, search_queries=search_queries)
+        search = await asyncio.to_thread(client.search, objective=objective, search_queries=search_queries)
 
         results = list(getattr(search, "results", []) or [])
         top = results[0] if results else None

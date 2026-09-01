@@ -38,8 +38,7 @@ async def main():
     await board(scene_id=scene_id, heading=scene["heading"], action=scene["action"], style_reference="neo-noir, tungsten key light")
     await score(scene_id=scene_id, heading=scene["heading"], action=scene["action"], mood_keywords="tense neo-noir")
 
-    for line in scene["dialogue"]:
-        await voice(scene_id=scene_id, line_id=line["id"], speaker=line["speaker"], line=line["line"], intent=line["intent"])
+    await voice(scene_id=scene_id)
 
     result = await assemble(scene_id=scene_id)
     print(json.dumps(result, indent=2))
