@@ -13,9 +13,11 @@ export default defineConfig({
     server: { entry: "server" },
   },
   // Lovable's default nitro target is cloudflare-module (wrangler.json output).
-  // We deploy this service as a plain Node.js container on Cloud Run instead,
-  // so pin the node-server preset here — see README "Deploying the frontend".
+  // Cloud Run needs a plain Node.js container (node-server, ships in a Dockerfile);
+  // Vercel needs the Build Output API (vercel preset, emits .vercel/output) --
+  // Vercel always sets process.env.VERCEL during its build, so branch on that.
+  // See README "Deploying the frontend".
   nitro: {
-    preset: "node-server",
+    preset: process.env["VERCEL"] ? "vercel" : "node-server",
   },
 });
