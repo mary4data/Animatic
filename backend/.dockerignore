@@ -1,0 +1,11 @@
+# Same exclusions as .gcloudignore, for local `docker build` -- secrets and
+# generated media must never end up in the image layer.
+.dockerignore
+.gcloudignore
+.git
+.env
+.venv/
+__pycache__/
+**/__pycache__/
+storage/*
+!storage/.gitkeep

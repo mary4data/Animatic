@@ -1,0 +1,14 @@
+# Keep secrets and generated media out of the Cloud Build upload. Without
+# this, `gcloud run deploy --source .` uploads everything in backend/ --
+# including .env (which the Dockerfile's `COPY . .` would then bake into the
+# image) and every generated frame/wav under storage/.
+.gcloudignore
+.dockerignore
+.git
+.gitignore
+.env
+.venv/
+__pycache__/
+**/__pycache__/
+storage/*
+!storage/.gitkeep

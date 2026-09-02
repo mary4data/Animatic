@@ -20,27 +20,86 @@ the final output.
 
 ## Architecture
 
+Two views of the same run: **what talks to what** (below), then **the order the agent
+calls its tools**.
+
+```mermaid
+flowchart LR
+    subgraph FE["Frontend · TanStack Start / React (SSR)"]
+        direction TB
+        UP["Upload"]
+        SEL["Select scenes"]
+        CST["Cast"]
+        PRC["Process<br/>(live trace)"]
+        SCN["Scenes"]
+        DCK["Deck"]
+        UP --> SEL --> CST --> PRC --> SCN --> DCK
+    end
+
+    subgraph BE["Backend · FastAPI"]
+        direction TB
+        API["api/routes.py"]
+        STORE[("job_store<br/>job state · photo scratch<br/>per-job SSE queue")]
+        DISK[("/media on local disk<br/>frames .jpg · voice .wav")]
+        PDFGEN["pdf.py · reportlab"]
+    end
+
+    ORCH["<b>agent/orchestrator.py</b><br/>one Google ADK Agent (Gemini)<br/>9 FunctionTools, model-chosen order"]
+
+    GEM["Gemini API<br/>text · image · TTS"]
+    PAR["Parallel Search API"]
+
+    UP -->|"POST /api/scripts"| API
+    SEL -->|"POST …/scenes/select"| API
+    CST -->|"POST …/characters/:name/photo<br/>POST …/casting/confirm"| API
+    API -->|"create_task(run_job)"| ORCH
+    API -->|"sets the asyncio.Event<br/>a paused tool waits on"| STORE
+    STORE -.->|"resumes the same run"| ORCH
+    ORCH -->|"one JSON trace event<br/>per tool start / finish"| STORE
+    STORE -->|"SSE GET …/events<br/>+ /events/history replay"| PRC
+    ORCH -->|"writes frames + audio"| DISK
+    API -->|"GET …/scenes"| SCN
+    DISK -->|"GET /media/…"| SCN
+    DCK -->|"GET …/deck.pdf"| PDFGEN
+    ORCH ==>|"function-calling loop"| GEM
+    ORCH ==>|"ground_visual_style"| PAR
+
+    classDef ext fill:#fdf1dc,stroke:#a8620a,color:#1a1a1a;
+    classDef agent fill:#e6f0fd,stroke:#1a56b8,color:#1a1a1a;
+    class GEM,PAR ext;
+    class ORCH agent;
 ```
-frontend (TanStack Start / React, SSR)  ──HTTP/SSE──▶  backend (FastAPI)
-  Upload → Select scenes → Cast → Process → Scenes → Deck    │
-                                                               ▼
-                                           Orchestrator: one Google ADK Agent
-                                           (Gemini, function-calling loop)
-                                                               │
-                        once per run, in order:
-             parse_script → wait_for_scene_selection → wait_for_casting
-                                          → describe_character_reference (per cast photo)
-                                                               │
-                          then, per selected scene (≤ 12), in order:
-                ┌───────────────┬───────────────┬──────────────┬────────────────┐
-                ▼                ▼               ▼               ▼               │
-          ground_visual_    generate_       generate_       generate_          │
-          style             storyboard      score           voice_lines        │
-          (Parallel Search)  (Gemini image,  (Gemini text)   (Gemini TTS,      │
-                              up to 3 frames)                  per line)        │
-                └───────────────┴───────────────┴──────────────┴───────┬────────┘
-                                                                        ▼
-                                                                assemble_output
+
+**Run order.** Bold names are the 9 ADK tools; ⏸ marks the two human-in-the-loop
+pauses, which block the *same* agent run rather than splitting it into two.
+
+```mermaid
+flowchart TB
+    START(["POST /api/scripts"]) --> P
+
+    P["<b>parse_script</b><br/>≤ 20 scenes, dialogue lines + intent"]
+    W1["⏸ <b>wait_for_scene_selection</b><br/>blocks on asyncio.Event<br/>timeout → first 12 scenes"]
+    W2["⏸ <b>wait_for_casting</b><br/>blocks on asyncio.Event<br/>5-min timeout → zero photos"]
+    D["<b>describe_character_reference</b><br/>once per uploaded photo · Gemini text"]
+
+    P --> W1 --> W2 --> D
+
+    subgraph LOOP["then for each selected scene, in order (≤ 12 scenes)"]
+        direction TB
+        G["<b>ground_visual_style</b><br/>Parallel Search · real network call"]
+        B["<b>generate_storyboard</b><br/>Gemini image · ≤ 3 frames<br/>(≤ 1 per dialogue line, + cast photo)"]
+        S["<b>generate_score</b><br/>Gemini text · temp-score line"]
+        V["<b>generate_voice_lines</b><br/>Gemini TTS · one call per line"]
+        A["<b>assemble_output</b><br/>finalize the scene"]
+        G --> B --> S --> V --> A
+    end
+
+    D --> G
+    A -.->|"next selected scene"| G
+    A --> DONE(["job_completed<br/>→ Scenes · Deck · deck.pdf"])
+
+    classDef pause fill:#fdf1dc,stroke:#a8620a,color:#1a1a1a;
+    class W1,W2 pause;
 ```
 
 The frontend is the existing Lovable export at [`/frontend`](frontend) — integrated,
