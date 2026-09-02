@@ -38,7 +38,16 @@ For each scene produce:
   - "intent": your inference of the line's emotional tone/subtext in 2-4 words \
     (e.g. "quiet devastation", "wry deflection", "barely-controlled anger")
 
-Return ONLY a JSON object: {{"scenes": [...]}} with no surrounding prose.
+Also return a top-level "characters" array: one entry per distinct speaking character \
+across the whole excerpt (name spelled exactly as used in "speaker" fields), each with:
+- "name": the character name, exactly as used in "speaker" fields
+- "voice_gender": your best guess at a vocal-gender presentation to cast a text-to-speech \
+  voice for this character -- "female", "male", or "neutral" if the script gives no real \
+  clue either way. Base this on pronouns/context actually used to describe or address the \
+  character in the action lines and parentheticals when present; a name alone is a weak \
+  signal on its own but is a reasonable fallback when nothing else is available.
+
+Return ONLY a JSON object: {{"scenes": [...], "characters": [...]}} with no surrounding prose.
 
 SCRIPT:
 ---
@@ -78,6 +87,23 @@ def make_parse_script_tool(job_id: str, script_text: str):
                     seen.add(key)
                     characters.append(name)
         job_store.set_characters(job_id, characters)
+
+        # voice_gender guesses, keyed case-insensitively to match however the
+        # dialogue itself cased the name -- generate_voice_lines reads this
+        # back out of character_scratch to pick a gender-appropriate TTS
+        # voice instead of a blind, gender-unaware hash over the raw name.
+        voice_genders = {}
+        for c in parsed.get("characters", []) or []:
+            name = (c.get("name") or "").strip()
+            gender = c.get("voice_gender")
+            if name and gender in ("female", "male"):
+                voice_genders[name.lower()] = gender
+
+        char_scratch = job_store.character_scratch_for(job_id)
+        for name in characters:
+            gender = voice_genders.get(name.lower())
+            if gender:
+                char_scratch.setdefault(name, {})["voice_gender"] = gender
 
         for i, scene in enumerate(scenes, start=1):
             scene_id = f"S{i:02d}"

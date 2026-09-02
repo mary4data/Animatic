@@ -3,8 +3,9 @@ APIs, before trusting it wired into the live orchestrator:
 
 1. wait_for_casting's timeout-degrades-gracefully path (nobody ever confirms).
 2. describe_character_reference against a real photo -- printed so you can
-   eyeball that it reads like a casting note, not an identity match, and
-   that the raw photo bytes are gone from scratch afterward.
+   eyeball that it reads like a casting note, and that the raw photo bytes
+   are still in scratch afterward (generate_storyboard reads them later; see
+   job_store.purge_character_photos for when they actually get deleted).
 
 python scripts/smoke_casting.py <path-to-a-test-photo.jpg>"""
 
@@ -44,10 +45,12 @@ async def test_description(photo_path: str):
     print("result:", result)
 
     scratch = job_store.character_scratch_for(job_id)
-    print("scratch entry after call:", scratch.get("KAEL"))
-    assert "photo_bytes" not in scratch.get("KAEL", {}), "photo bytes should be deleted after the call"
-    assert "photo_mime" not in scratch.get("KAEL", {}), "photo mime should be deleted after the call"
-    print("OK -- raw photo bytes are gone from scratch; only the text description remains.")
+    print("scratch entry after call:", {k: v for k, v in scratch.get("KAEL", {}).items() if k != "photo_bytes"})
+    assert "photo_bytes" in scratch.get("KAEL", {}), "photo bytes should still be in scratch for generate_storyboard"
+    assert "description" in scratch.get("KAEL", {}), "a casting-note description should have been added"
+    job_store.purge_character_photos(job_id)
+    assert "photo_bytes" not in scratch.get("KAEL", {}), "purge_character_photos should delete the photo bytes"
+    print("OK -- photo bytes persisted through the call for generate_storyboard, and purge_character_photos clears them.")
 
 
 async def main():

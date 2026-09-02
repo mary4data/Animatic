@@ -19,6 +19,32 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
+# Bounds how many Gemini calls (across all tools -- text, image, TTS) run at
+# once. call_gemini_with_retry's own to_thread offload plus the tools'
+# asyncio.gather usage (per-scene images, per-scene voice lines) means a
+# single scene can otherwise burst 5-10+ simultaneous requests at the same
+# per-minute-per-model quota (free-tier keys can be as low as 10 req/min for
+# a given model, e.g. the TTS preview model) -- capping concurrency keeps
+# a burst from instantly blowing through that, on top of the 429 retry below.
+_GEMINI_MAX_CONCURRENCY = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "4"))
+_gemini_semaphore = asyncio.Semaphore(_GEMINI_MAX_CONCURRENCY)
+
+
+def _rate_limit_retry_delay(exc: Any) -> float | None:
+    """Google's 429 body includes a RetryInfo.retryDelay (e.g. "15s") telling
+    us exactly how long to wait -- prefer that over guessing."""
+    details = getattr(exc, "details", None) or {}
+    if "error" in details:
+        details = details["error"]
+    for item in details.get("details") or []:
+        if str(item.get("@type", "")).endswith("RetryInfo"):
+            raw = str(item.get("retryDelay", "")).rstrip("s")
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+    return None
+
 
 @functools.lru_cache(maxsize=1)
 def get_genai_client():
@@ -75,7 +101,9 @@ def gemini_image_model() -> str:
 # not long enough -- the couple of retries land inside the same brief window
 # of overload. This wraps a call with a few more attempts at wider spacing
 # (5s, 15s, 30s) so a run rides out a transient spike instead of failing the
-# whole scene/job over it. Only retries on 503 (ServerError); anything else
+# whole scene/job over it. Also retries 429 (rate limit / quota exhausted),
+# using the server's own suggested retryDelay when present since that's a
+# hard "wait exactly this long" instruction, not a guess. Anything else
 # (400s, auth errors, etc.) fails immediately since retrying won't help.
 async def call_gemini_with_retry(fn: Callable[..., Any], *args, **kwargs) -> Any:
     from google.genai import errors
@@ -83,7 +111,8 @@ async def call_gemini_with_retry(fn: Callable[..., Any], *args, **kwargs) -> Any
     delays = (5, 15, 30)
     for attempt, delay in enumerate((*delays, None), start=1):
         try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
+            async with _gemini_semaphore:
+                return await asyncio.to_thread(fn, *args, **kwargs)
         except errors.ServerError as exc:
             if delay is None:
                 raise
@@ -95,3 +124,15 @@ async def call_gemini_with_retry(fn: Callable[..., Any], *args, **kwargs) -> Any
                 exc,
             )
             await asyncio.sleep(delay)
+        except errors.ClientError as exc:
+            if exc.code != 429 or delay is None:
+                raise
+            wait = _rate_limit_retry_delay(exc) or delay
+            logger.warning(
+                "Gemini call hit a rate limit (attempt %d/%d), retrying in %.1fs: %s",
+                attempt,
+                len(delays) + 1,
+                wait,
+                exc,
+            )
+            await asyncio.sleep(wait)

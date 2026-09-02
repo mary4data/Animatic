@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { PitchFrame } from "@/components/pitch/PitchFrame";
 import { SceneReel } from "@/components/pitch/SceneReel";
 import { getScenes } from "@/lib/api";
-import type { Scene } from "@/lib/pitch-data";
+import type { Scene, SceneImage } from "@/lib/pitch-data";
 
 export const Route = createFileRoute("/scenes/$jobId")({
   head: () => ({
@@ -39,6 +39,10 @@ function Scenes() {
       cancelled = true;
     };
   }, [jobId]);
+
+  const handleImagesChange = (sceneId: string, images: SceneImage[]) => {
+    setScenes((prev) => prev.map((s) => (s.id === sceneId ? { ...s, images } : s)));
+  };
 
   if (loading) {
     return (
@@ -89,7 +93,7 @@ function Scenes() {
         </div>
 
         <div className="mt-8">
-          <SceneReel scenes={scenes} />
+          <SceneReel scenes={scenes} jobId={jobId} onImagesChange={handleImagesChange} />
         </div>
       </div>
     </PitchFrame>

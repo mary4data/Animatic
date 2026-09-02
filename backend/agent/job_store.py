@@ -29,12 +29,18 @@ class JobRecord:
     # scratch space tool calls accumulate into before assemble_output finalizes
     # a Scene -- e.g. {"S01": {"image_url": ..., "score": ..., "lines": {...}}}
     scratch: dict[str, dict] = field(default_factory=dict)
-    # keyed by character name: {"photo_bytes": bytes, "photo_mime": str} until
-    # describe_character_reference consumes and deletes them, then
-    # {"description": str} persists. Never written to disk (agent/storage.py's
-    # save_media is for durable media; this stays in-memory only, and is
-    # purged even if a photo is never described -- see purge_character_photos).
+    # keyed by character name: {"photo_bytes": bytes, "photo_mime": str, ...}.
+    # describe_character_reference adds a "description" alongside the photo
+    # (it no longer deletes the photo -- generate_storyboard reads it later,
+    # per scene, to keep that character's face consistent across frames).
+    # Never written to disk (agent/storage.py's save_media is for durable
+    # media; this stays in-memory only) and is unconditionally purged at the
+    # end of every run -- see purge_character_photos.
     character_scratch: dict[str, dict] = field(default_factory=dict)
+    # Chosen once at upload time (POST /api/scripts), applied to every
+    # storyboard frame in the run -- see generate_storyboard.py's
+    # STYLE_DIRECTIVES. "realistic" or "animated".
+    visual_style: str = "realistic"
     casting_event: asyncio.Event = field(default_factory=asyncio.Event)
     scene_selection_event: asyncio.Event = field(default_factory=asyncio.Event)
     selected_scene_ids: list[str] = field(default_factory=list)
@@ -48,10 +54,13 @@ class JobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, JobRecord] = {}
 
-    def create(self) -> str:
+    def create(self, visual_style: str = "realistic") -> str:
         job_id = uuid.uuid4().hex[:12]
-        self._jobs[job_id] = JobRecord(job=Job(job_id=job_id))
+        self._jobs[job_id] = JobRecord(job=Job(job_id=job_id), visual_style=visual_style)
         return job_id
+
+    def visual_style_for(self, job_id: str) -> str:
+        return self._jobs[job_id].visual_style
 
     def get(self, job_id: str) -> JobRecord | None:
         return self._jobs.get(job_id)
@@ -136,10 +145,19 @@ class JobStore:
     def set_pdf_cache(self, job_id: str, data: bytes) -> None:
         self._jobs[job_id].pdf_cache = data
 
+    def clear_pdf_cache(self, job_id: str) -> None:
+        """Invalidates a cached deck PDF -- call after any edit to a scene's
+        images (delete/regenerate) so the next .../deck.pdf request rebuilds
+        it instead of serving a PDF with the old frame(s)."""
+        self._jobs[job_id].pdf_cache = None
+
     def purge_character_photos(self, job_id: str) -> None:
-        """Safety net: drop any raw photo bytes still sitting in scratch, even
-        if describe_character_reference was never called for them -- a photo
-        must never outlive the run it was uploaded for."""
+        """The single point where uploaded photo bytes are deleted: called
+        unconditionally in orchestrator.run_job's finally block. Covers both
+        the normal case (a photo describe_character_reference/generate_storyboard
+        used all run) and the safety-net case (describe_character_reference was
+        never called for it, e.g. the run errored out early) -- a photo must
+        never outlive the run it was uploaded for, either way."""
         for entry in self._jobs[job_id].character_scratch.values():
             entry.pop("photo_bytes", None)
             entry.pop("photo_mime", None)

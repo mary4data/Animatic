@@ -163,6 +163,20 @@ function Process() {
     >
       <div className="grid grid-cols-1 lg:grid-cols-12">
         <div className="border-b border-border px-6 py-8 md:px-10 lg:col-span-6 lg:border-b-0 lg:border-r">
+          <div className="mb-6 flex flex-wrap items-center gap-3">
+            <Link
+              to="/scenes/$jobId"
+              params={{ jobId }}
+              className={`label border px-4 py-3 transition-colors ${
+                finished
+                  ? "border-foreground bg-foreground text-background hover:bg-accent"
+                  : "pointer-events-none border-border text-muted-foreground"
+              }`}
+            >
+              {finished ? "Review scenes →" : "Scenes unlock at pass end"}
+            </Link>
+          </div>
+
           <AgentTrace parseStatus={state.parseStatus} sceneTraces={sceneTraces} />
 
           {connectionIssue && !finished && !failed && (
@@ -207,20 +221,6 @@ function Process() {
               {state.jobError ?? "The run failed. Check the backend logs."}
             </p>
           )}
-
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link
-              to="/scenes/$jobId"
-              params={{ jobId }}
-              className={`label border px-4 py-3 transition-colors ${
-                finished
-                  ? "border-foreground bg-foreground text-background hover:bg-accent"
-                  : "pointer-events-none border-border text-muted-foreground"
-              }`}
-            >
-              {finished ? "Review scenes →" : "Scenes unlock at pass end"}
-            </Link>
-          </div>
         </div>
 
         <div className="px-6 py-8 md:px-10 lg:col-span-6">

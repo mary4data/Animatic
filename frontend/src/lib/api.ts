@@ -11,9 +11,15 @@ function apiUrl(path: string): string {
   return `${API_BASE_URL ?? ""}${path}`;
 }
 
-export async function submitScript(file: File): Promise<{ jobId: string }> {
+export type VisualStyle = "realistic" | "animated";
+
+export async function submitScript(
+  file: File,
+  visualStyle: VisualStyle = "realistic",
+): Promise<{ jobId: string }> {
   const form = new FormData();
   form.append("file", file);
+  form.append("visual_style", visualStyle);
   const res = await fetch(apiUrl("/api/scripts"), { method: "POST", body: form });
   if (!res.ok) throw new Error(`Upload failed: ${res.status} ${await res.text()}`);
   const data = (await res.json()) as { job_id: string };
@@ -130,6 +136,36 @@ export async function uploadCharacterPhoto(
 export async function confirmCasting(jobId: string): Promise<void> {
   const res = await fetch(apiUrl(`/api/scripts/${jobId}/casting/confirm`), { method: "POST" });
   if (!res.ok) throw new Error(`Failed to confirm casting: ${res.status} ${await res.text()}`);
+}
+
+/** Removes one storyboard frame from a scene. Returns the scene's remaining
+ * frames so the caller can update local state without a full re-fetch. */
+export async function deleteSceneImage(
+  jobId: string,
+  sceneId: string,
+  order: number,
+): Promise<{ images: RawSceneImage[] }> {
+  const res = await fetch(apiUrl(`/api/scripts/${jobId}/scenes/${sceneId}/images/${order}`), {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete frame: ${res.status} ${await res.text()}`);
+  return (await res.json()) as { images: RawSceneImage[] };
+}
+
+/** Re-renders one existing frame in place (same beat, a fresh image) and
+ * returns it — the URL changes even though the beat/order don't, so callers
+ * should replace rather than merge into their existing image list. */
+export async function regenerateSceneImage(
+  jobId: string,
+  sceneId: string,
+  order: number,
+): Promise<{ image: RawSceneImage }> {
+  const res = await fetch(
+    apiUrl(`/api/scripts/${jobId}/scenes/${sceneId}/images/${order}/regenerate`),
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`Failed to regenerate frame: ${res.status} ${await res.text()}`);
+  return (await res.json()) as { image: RawSceneImage };
 }
 
 /** Fetches the generated pitch-deck PDF as a blob, for a completed job.

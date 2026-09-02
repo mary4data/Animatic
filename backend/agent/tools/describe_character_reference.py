@@ -1,13 +1,15 @@
-"""Tool: describe_character_reference -- a casting note from a photo, never a face match.
+"""Tool: describe_character_reference -- a text casting note from a photo.
 
-Hard boundary: the photo is only ever sent to a Gemini *text-generation*
-call that produces a short physical-description string -- general age
-range, build, hair, coloring, notable styling. It is NEVER passed into
-image generation, and the system makes no attempt at face-preservation,
-face-swap, or subject-consistency-from-image. The output describes a
-fictional character inspired by the photo's general look, not a rendering
-of the actual uploaded person. The raw photo bytes are deleted from scratch
-immediately after this call, whether it succeeds or fails.
+Produces a short physical-description string (approximate age range, build,
+hair, coloring, notable styling) from the uploaded reference photo, folded
+into every storyboard prompt for that character's scenes (see
+generate_storyboard.py's character_suffix). The photo itself is kept in the
+job's in-memory character scratch (not deleted here) because
+generate_storyboard also attaches it directly to the image-generation call
+for that character's scenes, so the same face recurs across frames instead
+of a new one being invented each time. The photo is purged at end of job by
+job_store.purge_character_photos regardless of how the run ends -- it never
+persists beyond the run it was uploaded for.
 """
 
 from __future__ import annotations
@@ -22,26 +24,24 @@ from agent.schemas import TraceEvent
 logger = logging.getLogger(__name__)
 
 PROMPT = """You are writing a brief casting/styling note for a storyboard artist, based \
-on the attached reference photo. Describe only general, non-identifying visual \
-characteristics useful for illustrating a FICTIONAL character inspired by this photo's \
-general look -- NOT a description meant to reproduce or identify the actual person.
+on the attached reference photo -- context for illustrating this character alongside \
+the photo itself, which the storyboard artist will also have as a direct visual reference.
 
 Cover, in a few phrases: approximate age range (e.g. "early 30s"), general build, hair \
 color and style, general skin tone/coloring, and any notable styling choices (glasses, a \
 notable clothing style, etc.) visible in the photo.
 
-Do NOT mention or guess names. Do NOT attempt to identify who this is. Do NOT describe \
-facial features with enough precision to reconstruct an exact likeness (no exact \
-measurements or highly specific facial geometry) -- stay at the level of a casting note, \
-e.g. "athletic build, short dark hair, warm brown skin tone, wire-frame glasses."
+Do NOT mention or guess names.
 
 Return ONLY JSON: {"description": "<one or two sentence casting-note style description>"}"""
 
 
 def make_describe_character_reference_tool(job_id: str):
     async def describe_character_reference(character_name: str) -> dict:
-        """Generate a general, non-identifying physical-description casting
-        note for a character from their uploaded reference photo. Call once
+        """Generate a short physical-description casting note for a character
+        from their uploaded reference photo (used as extra text context
+        alongside the photo itself, which generate_storyboard attaches
+        directly to its image calls for this character's scenes). Call once
         for each name in wait_for_casting's characters_with_photo result. A
         no-op (returns description=null) if no photo is present for that
         name -- safe to call even without checking first."""
@@ -79,10 +79,10 @@ def make_describe_character_reference_tool(job_id: str):
         except Exception:  # noqa: BLE001 -- a failed description shouldn't fail the whole run
             logger.exception("describe_character_reference failed for %s", character_name)
             description = None
-        finally:
-            # Hard boundary: the raw photo never outlives this call, success or not.
-            entry.pop("photo_bytes", None)
-            entry.pop("photo_mime", None)
+        # photo_bytes/photo_mime deliberately kept in scratch here -- generate_storyboard
+        # reads them later for this character's scenes. job_store.purge_character_photos
+        # (called unconditionally in orchestrator.run_job's finally block) is what deletes
+        # them, whether or not this call succeeded.
 
         await job_store.emit(
             job_id,

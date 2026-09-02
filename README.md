@@ -2,8 +2,9 @@
 
 Turns a script excerpt (PDF, FDX, or plain text) into a pitch-ready package: parses up
 to 20 scenes, lets the user pick up to 12 to actually produce, lets the user optionally
-cast each character from a reference photo, then generates — per scene — 2-3
-crossfaded storyboard frames, a one-line temp-score description, and voiced dialogue,
+cast each character from a reference photo, then generates — per scene — up to 3
+crossfaded storyboard frames (never more than the scene has dialogue lines), a
+one-line temp-score description, and voiced dialogue,
 all visible step by step as the agent works. The finished package exports as a
 printable PDF pitch deck.
 
@@ -36,7 +37,7 @@ frontend (TanStack Start / React, SSR)  ──HTTP/SSE──▶  backend (FastAP
           ground_visual_    generate_       generate_       generate_          │
           style             storyboard      score           voice_lines        │
           (Parallel Search)  (Gemini image,  (Gemini text)   (Gemini TTS,      │
-                              2-3 frames)                      per line)        │
+                              up to 3 frames)                  per line)        │
                 └───────────────┴───────────────┴──────────────┴───────┬────────┘
                                                                         ▼
                                                                 assemble_output
@@ -76,15 +77,16 @@ normal, valid outcome). An unanswered scene-selection pause can't degrade the sa
 way — "generate nothing" would be a broken result — so it times out to the first 12
 parsed scenes instead, keeping the run moving.
 
-**Casting privacy boundary** (`backend/agent/tools/describe_character_reference.py`):
-an uploaded reference photo is only ever sent to a Gemini *text*-generation call that
-returns a short, non-identifying casting note (approximate age range, build, hair,
-general coloring) for a *fictional* character inspired by the photo's general look.
-The photo is never passed into image generation, there is no face-preservation or
-face-swap attempt, and the raw photo bytes are deleted from the job's in-memory
-scratch state immediately after the call, whether it succeeds or fails — with
-`job_store.purge_character_photos` as a safety-net cleanup if the run ends before that
-call happens at all.
+**Cast-photo consistency, and its lifecycle.** An uploaded reference photo is sent to
+a Gemini text call (`describe_character_reference.py`) for a short casting note
+(approximate age range, build, hair, general coloring), *and* the raw photo bytes are
+attached directly to every `generate_storyboard` image-generation call for that
+character's scenes (`generate_storyboard.py`), so the same face recurs across frames
+instead of a new one being invented per call. The photo is kept in the job's
+in-memory scratch state for the run and deleted unconditionally at the end of it —
+`job_store.purge_character_photos`, called in `orchestrator.run_job`'s `finally` block
+— whether the run succeeded, failed, or never got to `describe_character_reference` at
+all. It is never written to disk and never outlives the run it was uploaded for.
 
 *Note: an earlier build also had a self-QC step here — sending each generated voice
 line back to Gemini as multimodal audio input to check whether the delivery matched
@@ -119,16 +121,14 @@ back to a text-only grounding panel when it doesn't.
   have). Substituted with `gemini-3.1-flash-image` by default, via the same Developer
   API key already used for text/TTS — no Vertex/ADC needed — which the hackathon spec
   explicitly allows ("a placeholder/simpler image model if Imagen access/quota is an
-  issue"). Each scene gets 2-3 frames (one per identified visual beat, crossfaded in
-  the frontend), and each frame falls back individually to a generated placeholder if
+  issue"). Each scene gets up to 3 frames (one per identified visual beat, capped at
+  one frame per dialogue line, crossfaded in the frontend), and each frame falls
+  back individually to a generated placeholder if
   its own call fails, rather than crashing the scene — visible in the trace
   (`detail: "placeholder frame (...)"`), not silently swapped in.
 - **No tone/emotion QC pass on generated voice lines** — see the note at the end of
   "How Gemini + ADK are used"; a prior self-QC + retry step was removed and has not
   been reinstated.
-- **Casting is a visual-description note, not likeness generation** — see "Casting
-  privacy boundary" above; there is no face-consistent character generation from an
-  uploaded photo.
 - **Text-only temp-score description**, not audio — Lyria audio synthesis is future
   work, not built here.
 - **Single-speaker Gemini TTS**, one call per dialogue line, labeled by speaker —
@@ -323,5 +323,3 @@ the pitch package as a PDF.
 - Deck share-link (export-to-PDF is now real; share is still an inert stub in the UI).
 - GCS + Firestore/Redis backing store, to run beyond a single Cloud Run instance.
 - Proper `.fdx` (Final Draft XML) parsing.
-- Face-consistent character generation from a casting photo (current build produces a
-  general, non-identifying text description only — see "Casting privacy boundary").

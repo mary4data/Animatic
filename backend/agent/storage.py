@@ -23,3 +23,21 @@ def save_media(job_id: str, filename: str, data: bytes) -> str:
     path = job_dir / filename
     path.write_bytes(data)
     return f"{_public_base_url()}/media/{job_id}/{filename}"
+
+
+def delete_media(job_id: str, filename: str) -> None:
+    """Best-effort cleanup for a frame removed via DELETE .../images/{order}
+    -- the job record is the source of truth either way, so a failure here
+    (already gone, permissions) isn't worth surfacing as an error."""
+    (STORAGE_ROOT / job_id / filename).unlink(missing_ok=True)
+
+
+def read_media(job_id: str, filename: str) -> bytes | None:
+    """Reads back a previously-saved file's bytes -- e.g. an existing
+    storyboard frame, used as an image reference for a later regenerate call.
+    Returns None rather than raising if it's gone (deleted, bad filename);
+    callers treat that reference as simply unavailable."""
+    try:
+        return (STORAGE_ROOT / job_id / filename).read_bytes()
+    except OSError:
+        return None

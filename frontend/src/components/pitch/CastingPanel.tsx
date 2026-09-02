@@ -39,10 +39,9 @@ export function CastingPanel({
     <div className="animate-frame-in border-2 border-accent bg-card p-5">
       <span className="label text-accent">Cast your characters</span>
       <p className="mt-2 max-w-[52ch] text-xs leading-relaxed text-muted-foreground">
-        Optional: upload a reference photo per character to inform their visual description in the
-        storyboards. This is used as general styling inspiration only — approximate build, hair, and
-        coloring — never a face match. The photo itself is never fed into image generation and is
-        discarded right after.
+        Optional: upload a reference photo per character to keep their face and general likeness
+        consistent across every storyboard frame they appear in. The photo is kept only for the run
+        it's uploaded for and deleted unconditionally once the run ends, however it finishes.
       </p>
 
       <div className="mt-4 space-y-3">

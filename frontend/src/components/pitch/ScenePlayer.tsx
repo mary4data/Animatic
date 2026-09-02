@@ -123,7 +123,10 @@ export function ScenePlayer({
         <div
           key={commentary.id}
           className="animate-frame-in absolute right-3 top-3 max-w-[26ch] cursor-pointer border border-white/20 bg-black/60 px-3 py-2 backdrop-blur-sm"
-          onClick={() => setCommentary(null)}
+          onClick={(e) => {
+            e.stopPropagation(); // dismiss the commentary only -- not a click on the picture itself
+            setCommentary(null);
+          }}
           role="note"
         >
           <span className="label mb-1 flex items-center gap-1.5 text-accent">

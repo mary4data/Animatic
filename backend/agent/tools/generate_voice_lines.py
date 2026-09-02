@@ -11,11 +11,28 @@ calls per line work on any tier and are labeled by speaker in the frontend
 transcript, per the user's explicit choice over the multi-speaker path.
 Voice is picked per-speaker (not per-line), so the same character sounds the
 same across every line they have in a job.
+
+Voice selection is gender-aware: parse_script.py asks Gemini to guess each
+character's vocal-gender presentation from the script itself (pronouns/
+context, name as a last resort) and stores it in character_scratch as
+"voice_gender" -- _voice_for reads that back to pick from the matching pool
+below, rather than hashing the character's name over the whole pool
+regardless of fit (the previous approach, which is what let a female
+character land on a male-leaning voice or vice versa). A character with no
+inferable gender (or an older/skipped parse) falls back to the combined
+pool, still picked deterministically per name.
+
+The per-name pick itself uses a stable hash (hashlib, not the builtin
+hash()) so it doesn't silently change on a server restart -- Python's
+builtin hash() is randomized per-process by default (PYTHONHASHSEED), so
+the exact same character name could previously land on a different voice
+after every redeploy even though nothing about the job changed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import wave
 from io import BytesIO
 
@@ -25,11 +42,22 @@ from agent.schemas import TraceEvent
 from agent.storage import save_media
 
 SAMPLE_RATE = 24000
-_VOICE_POOL = ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Zephyr"]
+
+# Gender classifications per Google's own Gemini-TTS voice documentation.
+_VOICE_POOL_FEMALE = ["Kore", "Aoede", "Zephyr", "Leda", "Autonoe", "Callirrhoe", "Despina", "Erinome"]
+_VOICE_POOL_MALE = ["Puck", "Charon", "Fenrir", "Orus", "Algieba", "Enceladus", "Iapetus", "Umbriel"]
+_VOICE_POOL_NEUTRAL = _VOICE_POOL_FEMALE + _VOICE_POOL_MALE
 
 
-def _voice_for(speaker: str) -> str:
-    return _VOICE_POOL[hash(speaker) % len(_VOICE_POOL)]
+def _stable_index(key: str, modulus: int) -> int:
+    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % modulus
+
+
+def _voice_for(job_id: str, speaker: str) -> str:
+    char_scratch = job_store.character_scratch_for(job_id)
+    gender = (char_scratch.get(speaker) or {}).get("voice_gender")
+    pool = {"female": _VOICE_POOL_FEMALE, "male": _VOICE_POOL_MALE}.get(gender, _VOICE_POOL_NEUTRAL)
+    return pool[_stable_index(speaker, len(pool))]
 
 
 def _pcm_to_wav(pcm: bytes) -> bytes:
@@ -72,7 +100,7 @@ def make_generate_voice_lines_tool(job_id: str):
                     response_modalities=["AUDIO"],
                     speech_config=types.SpeechConfig(
                         voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=_voice_for(speaker))
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=_voice_for(job_id, speaker))
                         )
                     ),
                 ),

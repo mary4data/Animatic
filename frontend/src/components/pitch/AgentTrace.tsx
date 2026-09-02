@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { SceneTrace, TraceStatus, TraceStepEntry } from "@/lib/trace";
 
 const STATUS_LABEL: Record<TraceStatus, string> = {
@@ -67,6 +68,50 @@ function Row({ step }: { step: TraceStepEntry }) {
   );
 }
 
+// What a collapsed scene's title shows: whichever step is furthest along
+// (running, or the last one to finish) -- steps proceed in SCENE_STEP_ORDER,
+// so the furthest non-pending step is "what the agent is doing, or just
+// did, for this scene" without needing to expand it. Once every step is
+// done this reports "Complete" instead of just repeating the last step's
+// label, so a finished scene doesn't read as if it's still mid-step.
+function currentStepInfo(steps: TraceStepEntry[]): { label: string; status: TraceStatus } | null {
+  if (steps.length > 0 && steps.every((s) => s.status === "done")) {
+    return { label: "Complete", status: "done" };
+  }
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i]!;
+    if (step.status !== "pending") return { label: step.label, status: step.status };
+  }
+  return null;
+}
+
+function SceneBlock({ scene }: { scene: SceneTrace }) {
+  const [expanded, setExpanded] = useState(false);
+  const current = currentStepInfo(scene.steps);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between gap-4 border-b border-border bg-card px-0 py-2 text-left transition-colors hover:bg-border/40"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="label shrink-0 text-muted-foreground">{expanded ? "▾" : "▸"}</span>
+          <span className="label truncate text-muted-foreground">
+            Scene {scene.sceneId} — {current?.label ?? scene.title}
+          </span>
+        </span>
+        {current && <StatusTag status={current.status} />}
+      </button>
+
+      {expanded &&
+        scene.steps.map((step) => <Row key={`${scene.sceneId}-${step.id}`} step={step} />)}
+    </div>
+  );
+}
+
 export function AgentTrace({
   parseStatus,
   sceneTraces,
@@ -109,16 +154,7 @@ export function AgentTrace({
       </div>
 
       {sceneTraces.map((scene) => (
-        <div key={scene.sceneId}>
-          <div className="border-b border-border bg-card px-0 py-2">
-            <span className="label text-muted-foreground">
-              Scene {scene.sceneId} — {scene.title}
-            </span>
-          </div>
-          {scene.steps.map((step) => (
-            <Row key={`${scene.sceneId}-${step.id}`} step={step} />
-          ))}
-        </div>
+        <SceneBlock key={scene.sceneId} scene={scene} />
       ))}
     </div>
   );
