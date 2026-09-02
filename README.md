@@ -11,6 +11,8 @@ printable PDF pitch deck.
 Built for **Agentic Cinema: The Summer Blockbuster Hackathon**, targeting the
 **Parallel** partner track (see "How Parallel is used" below).
 
+**Demo video:** [youtube.com/watch?v=1rRlX1GPeu4](https://www.youtube.com/watch?v=1rRlX1GPeu4)
+
 ## What it solves
 
 Most scripts never get visualized for a pitch because concept art, composers, and
